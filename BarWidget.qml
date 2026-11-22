@@ -96,6 +96,7 @@ Panel {
     messageIsError = false
     message = strings.t("applying")
     applyProc.successText = successText || strings.t("applied")
+    applyProc.lastArgs = args
     applyProc.command = ["python3", root.helperPath].concat(args)
     applyProc.running = true
   }
@@ -288,6 +289,7 @@ Panel {
   Process {
     id: applyProc
     property string successText: ""
+    property var lastArgs: []
     property string out: ""
     property string err: ""
     stdout: StdioCollector { waitForEnd: true; onStreamFinished: applyProc.out = text }
@@ -296,6 +298,13 @@ Panel {
       Qt.callLater(function() {
         root.busy = false
         root.installingKey = ""
+        if (exitCode === 3) {
+          // The helper wants consent the panel did not know was missing.
+          root.message = ""
+          root.pendingConsent = { args: applyProc.lastArgs, successText: applyProc.successText, detached: false, notice: "" }
+          root.refresh()
+          return
+        }
         if (exitCode === 0) {
           root.messageIsError = false
           var extra = ""

@@ -359,7 +359,7 @@ class Settings(unittest.TestCase):
 
   def test_write_commands_need_consent(self):
     fonts.CONSENT_FILE.unlink(missing_ok=True)
-    with self.assertRaises(fonts.UserError):
+    with self.assertRaises(fonts.ConsentRequired):
       fonts.main(["set-metric", "on"])
     self.assertFalse(fonts.SETTINGS_FILE.exists() and fonts.load_settings()["replaceMetricAliases"])
     with mock.patch.object(fonts, "apply_fontconfig"), mock.patch.object(fonts, "emit"):

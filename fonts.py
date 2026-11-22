@@ -150,6 +150,10 @@ class UserError(Exception):
   """A failure that is reported to the panel as is."""
 
 
+class ConsentRequired(UserError):
+  """Exit status 3: the panel answers it by asking for consent."""
+
+
 # ------------------------------------------------------------------ utils
 
 def emit(data):
@@ -1495,7 +1499,7 @@ def require_consent(given):
     STATE.mkdir(parents=True, exist_ok=True)
     CONSENT_FILE.write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
   if not CONSENT_FILE.exists():
-    raise UserError("Confirm once in the panel (or pass --yes) before the plugin changes your configuration")
+    raise ConsentRequired("Confirm once in the panel (or pass --yes) before the plugin changes your configuration")
 
 
 def parse_flags(args, names):
@@ -1576,6 +1580,9 @@ def main(argv):
 if __name__ == "__main__":
   try:
     sys.exit(main(sys.argv[1:]))
+  except ConsentRequired as e:
+    print(str(e), file=sys.stderr)
+    sys.exit(3)
   except UserError as e:
     print(str(e), file=sys.stderr)
     sys.exit(1)
