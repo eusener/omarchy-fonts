@@ -191,11 +191,12 @@ Panel {
 
   // ------------------------------------------------------------ view helpers
 
+  // Built once per state refresh, not once per picker binding.
+  readonly property var familyEntries: st ? st.families.map(function (n) { return { value: n, label: n } }) : []
+  readonly property var monoEntries: st ? st.monoFamilies.map(function (n) { return { value: n, label: n } }) : []
+
   function familyOptions(defaultLabel, mono) {
-    var list = [{ value: "", label: defaultLabel }]
-    var names = st ? (mono ? st.monoFamilies : st.families) : []
-    for (var i = 0; i < names.length; i++) list.push({ value: names[i], label: names[i] })
-    return list
+    return [{ value: "", label: defaultLabel }].concat(mono ? monoEntries : familyEntries)
   }
 
   function roleLabel(role) {
@@ -364,10 +365,14 @@ Panel {
     }
   }
 
-  FontLoader {
-    id: previewFont
-    source: root.previewPath ? "file://" + root.previewPath : ""
+  // Exists only while a preview file is loaded, so it never loads "".
+  Loader {
+    id: previewLoader
+    active: root.previewPath !== ""
+    sourceComponent: FontLoader { source: "file://" + root.previewPath }
   }
+  readonly property bool previewReady: previewLoader.item !== null && previewLoader.item.status === FontLoader.Ready
+  readonly property string previewFamily: previewReady ? previewLoader.item.name : ""
 
   Commons.ShellIpc {
     target: root.ipcTarget
@@ -415,8 +420,7 @@ Panel {
           var i = root.tabs.indexOf(root.tab)
           root.tab = root.tabs[Math.max(0, Math.min(root.tabs.length - 1, i + dx))]
         } else if (dy !== 0) {
-          panelFlick.contentY = Math.max(0, Math.min(panelFlick.contentHeight - panelFlick.height,
-                                                     panelFlick.contentY + dy * Style.space(60)))
+          panelFlick.scrollBy(dy * Style.space(60))
         }
       }
       onActivateRequested: {
@@ -450,7 +454,22 @@ Panel {
         boundsBehavior: Flickable.StopAtBounds
         flickableDirection: Flickable.VerticalFlick
         interactive: contentHeight > height
+        pixelAligned: true
         ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }
+
+        function scrollBy(dy) {
+          contentY = Math.max(0, Math.min(Math.max(0, contentHeight - height), contentY + dy))
+        }
+
+        // Wheel and touchpad move the content directly, like the built-in
+        // panels; Flickable's own wheel handling adds inertia that feels heavy.
+        WheelHandler {
+          acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+          onWheel: function(event) {
+            var d = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * Style.space(48)
+            panelFlick.scrollBy(-d)
+          }
+        }
 
         Column {
           id: column
@@ -491,351 +510,376 @@ Panel {
           }
 
           // ------------------------------------------------ system families
-          Column {
-            visible: root.tab === "system"
+          Loader {
             width: parent.width
-            spacing: Style.space(14)
-
-            PlainText {
-              width: parent.width
-              text: strings.t("system.help")
-              color: root.dim
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            Repeater {
-              model: ["sans", "serif", "monospace", "emoji"]
-              FontPicker {
-                required property string modelData
+            active: root.tab === "system"
+            visible: active
+            sourceComponent: Component {
+              Column {
                 width: parent ? parent.width : 0
-                label: strings.t("role." + modelData)
-                hint: strings.t("role." + modelData + ".help")
-                value: root.cfg ? (root.cfg.roles[modelData] || "") : ""
-                options: root.familyOptions(root.roleLabel(modelData), modelData === "monospace")
-                previewFamily: root.st ? root.st.resolved[modelData] : ""
-                previewText: modelData === "emoji" ? "😀 🎉 🚀 ❤️ 👍" : root.sampleText
-                onPicked: function(v) { root.setRole(modelData, v) }
+                spacing: Style.space(14)
+
+                PlainText {
+                  width: parent.width
+                  text: strings.t("system.help")
+                  color: root.dim
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                Repeater {
+                  model: ["sans", "serif", "monospace", "emoji"]
+                  FontPicker {
+                    required property string modelData
+                    width: parent ? parent.width : 0
+                    label: strings.t("role." + modelData)
+                    hint: strings.t("role." + modelData + ".help")
+                    value: root.cfg ? (root.cfg.roles[modelData] || "") : ""
+                    options: root.familyOptions(root.roleLabel(modelData), modelData === "monospace")
+                    previewFamily: root.st ? root.st.resolved[modelData] : ""
+                    previewText: modelData === "emoji" ? "😀 🎉 🚀 ❤️ 👍" : root.sampleText
+                    onPicked: function(v) { root.setRole(modelData, v) }
+                  }
+                }
+
+                OptionRow {
+                  width: parent.width
+                  title: strings.t("metric")
+                  subtitle: strings.t("metric.help")
+                  checked: root.cfg ? root.cfg.replaceMetricAliases : false
+                  onActivated: root.runHelper(["set-metric", checked ? "off" : "on"])
+                }
+
+                PanelSeparator { foreground: root.foreground }
+
+                ActionRow {
+                  width: parent.width
+                  glyph: "󰑓"
+                  title: strings.t("reset")
+                  subtitle: strings.t("reset.help")
+                  onActivated: root.pendingReset = true
+                }
               }
-            }
-
-            OptionRow {
-              width: parent.width
-              title: strings.t("metric")
-              subtitle: strings.t("metric.help")
-              checked: root.cfg ? root.cfg.replaceMetricAliases : false
-              onActivated: root.runHelper(["set-metric", checked ? "off" : "on"])
-            }
-
-            PanelSeparator { foreground: root.foreground }
-
-            ActionRow {
-              width: parent.width
-              glyph: "󰑓"
-              title: strings.t("reset")
-              subtitle: strings.t("reset.help")
-              onActivated: root.pendingReset = true
             }
           }
 
           // ------------------------------------------------ apps and sizes
-          Column {
-            visible: root.tab === "apps"
+          Loader {
             width: parent.width
-            spacing: Style.space(14)
-
-            PlainText {
-              width: parent.width
-              text: root.st ? strings.t("apps.scale").arg(root.st.shellBaseSize).arg(Commons.I18n.formatNumber(root.st.textScaling, 2)) : ""
-              color: root.dim
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            PanelSectionHeader { text: strings.t("gtk"); foreground: root.foreground; fontFamily: root.fontFamily }
-
-            Repeater {
-              model: ["interface", "document", "monospace"]
-              FontPicker {
-                id: gtkPicker
-                required property string modelData
-                readonly property var live: root.st ? root.st.gtk[modelData] : null
-                readonly property bool overridden: root.cfg ? root.cfg.gtk[modelData] !== null : false
+            active: root.tab === "apps"
+            visible: active
+            sourceComponent: Component {
+              Column {
                 width: parent ? parent.width : 0
-                label: strings.t("gtk." + modelData)
-                hint: strings.t("gtk." + modelData + ".help")
-                value: overridden && live ? live.family : ""
-                options: root.familyOptions(strings.t("systemValue").arg(live ? live.family : ""), modelData === "monospace")
-                previewFamily: live ? live.family : ""
-                previewText: root.sampleText
-                showSize: true
-                size: live && live.size ? Math.round(live.size) : 11
-                sizeFrom: 6
-                sizeTo: 48
-                onPicked: function(v) { root.setGtk(modelData, v, gtkPicker.size) }
-                onSizeEdited: function(s) { root.setGtk(modelData, gtkPicker.value || (live ? live.family : ""), s) }
+                spacing: Style.space(14)
+
+                PlainText {
+                  width: parent.width
+                  text: root.st ? strings.t("apps.scale").arg(root.st.shellBaseSize).arg(Commons.I18n.formatNumber(root.st.textScaling, 2)) : ""
+                  color: root.dim
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                PanelSectionHeader { text: strings.t("gtk"); foreground: root.foreground; fontFamily: root.fontFamily }
+
+                Repeater {
+                  model: ["interface", "document", "monospace"]
+                  FontPicker {
+                    id: gtkPicker
+                    required property string modelData
+                    readonly property var live: root.st ? root.st.gtk[modelData] : null
+                    readonly property bool overridden: root.cfg ? root.cfg.gtk[modelData] !== null : false
+                    width: parent ? parent.width : 0
+                    label: strings.t("gtk." + modelData)
+                    hint: strings.t("gtk." + modelData + ".help")
+                    value: overridden && live ? live.family : ""
+                    options: root.familyOptions(strings.t("systemValue").arg(live ? live.family : ""), modelData === "monospace")
+                    previewFamily: live ? live.family : ""
+                    previewText: root.sampleText
+                    showSize: true
+                    size: live && live.size ? Math.round(live.size) : 11
+                    sizeFrom: 6
+                    sizeTo: 48
+                    onPicked: function(v) { root.setGtk(modelData, v, gtkPicker.size) }
+                    onSizeEdited: function(s) { root.setGtk(modelData, gtkPicker.value || (live ? live.family : ""), s) }
+                  }
+                }
+
+                PanelSeparator { foreground: root.foreground }
+                PanelSectionHeader { text: strings.t("terminal"); foreground: root.foreground; fontFamily: root.fontFamily }
+
+                FontPicker {
+                  id: termPicker
+                  width: parent.width
+                  label: root.st ? strings.t("terminal.label").arg(root.st.terminal.present.join(", ") || "—") : strings.t("terminal")
+                  hint: strings.t("terminal.help")
+                  value: root.cfg ? (root.cfg.terminal.family || "") : ""
+                  options: root.familyOptions(strings.t("followMono"), true)
+                  previewFamily: root.st ? (root.st.terminal.family || root.st.resolved.monospace) : ""
+                  previewText: "fn main() { println!(\"0O 1lI {}[]\"); } →"
+                  showSize: true
+                  size: root.st && root.st.terminal.size ? Math.round(root.st.terminal.size) : 9
+                  sizeFrom: 5
+                  sizeTo: 40
+                  onPicked: function(v) { root.setTerminal(v, 0) }
+                  onSizeEdited: function(s) { root.setTerminal(termPicker.value, s) }
+                }
+
+                PanelSeparator { foreground: root.foreground }
+                PanelSectionHeader { text: strings.t("omarchy"); foreground: root.foreground; fontFamily: root.fontFamily }
+
+                FontPicker {
+                  id: groupPicker
+                  width: parent.width
+                  label: strings.t("groupbar")
+                  hint: strings.t("groupbar.help")
+                  value: root.cfg ? (root.cfg.groupbar.family || "") : ""
+                  options: root.familyOptions(strings.t("omarchyDefault"), false)
+                  previewFamily: root.st && root.st.groupbar.family ? root.st.groupbar.family : "monospace"
+                  previewText: root.sampleText
+                  showSize: true
+                  size: root.st && root.st.groupbar.size ? root.st.groupbar.size : 12
+                  sizeFrom: 6
+                  sizeTo: 40
+                  onPicked: function(v) { root.setGroupbar(v, groupPicker.size) }
+                  onSizeEdited: function(s) { root.setGroupbar(groupPicker.value, s) }
+                }
+
+                FontPicker {
+                  width: parent.width
+                  label: strings.t("menu")
+                  hint: strings.t("menu.help")
+                  value: root.cfg ? (root.cfg.menu.family || "") : ""
+                  options: root.familyOptions(strings.t("sameAsBar"), false)
+                  previewFamily: Style.font.menuFamily
+                  previewText: root.sampleText
+                  onPicked: function(v) { root.setMenu(v) }
+                }
+
+                ActionRow {
+                  width: parent.width
+                  glyph: "󰜉"
+                  title: strings.t("restartShell")
+                  subtitle: strings.t("restartShell.help")
+                  onActivated: root.restartShell()
+                }
               }
-            }
-
-            PanelSeparator { foreground: root.foreground }
-            PanelSectionHeader { text: strings.t("terminal"); foreground: root.foreground; fontFamily: root.fontFamily }
-
-            FontPicker {
-              id: termPicker
-              width: parent.width
-              label: root.st ? strings.t("terminal.label").arg(root.st.terminal.present.join(", ") || "—") : strings.t("terminal")
-              hint: strings.t("terminal.help")
-              value: root.cfg ? (root.cfg.terminal.family || "") : ""
-              options: root.familyOptions(strings.t("followMono"), true)
-              previewFamily: root.st ? (root.st.terminal.family || root.st.resolved.monospace) : ""
-              previewText: "fn main() { println!(\"0O 1lI {}[]\"); } →"
-              showSize: true
-              size: root.st && root.st.terminal.size ? Math.round(root.st.terminal.size) : 9
-              sizeFrom: 5
-              sizeTo: 40
-              onPicked: function(v) { root.setTerminal(v, 0) }
-              onSizeEdited: function(s) { root.setTerminal(termPicker.value, s) }
-            }
-
-            PanelSeparator { foreground: root.foreground }
-            PanelSectionHeader { text: strings.t("omarchy"); foreground: root.foreground; fontFamily: root.fontFamily }
-
-            FontPicker {
-              id: groupPicker
-              width: parent.width
-              label: strings.t("groupbar")
-              hint: strings.t("groupbar.help")
-              value: root.cfg ? (root.cfg.groupbar.family || "") : ""
-              options: root.familyOptions(strings.t("omarchyDefault"), false)
-              previewFamily: root.st && root.st.groupbar.family ? root.st.groupbar.family : "monospace"
-              previewText: root.sampleText
-              showSize: true
-              size: root.st && root.st.groupbar.size ? root.st.groupbar.size : 12
-              sizeFrom: 6
-              sizeTo: 40
-              onPicked: function(v) { root.setGroupbar(v, groupPicker.size) }
-              onSizeEdited: function(s) { root.setGroupbar(groupPicker.value, s) }
-            }
-
-            FontPicker {
-              width: parent.width
-              label: strings.t("menu")
-              hint: strings.t("menu.help")
-              value: root.cfg ? (root.cfg.menu.family || "") : ""
-              options: root.familyOptions(strings.t("sameAsBar"), false)
-              previewFamily: Style.font.menuFamily
-              previewText: root.sampleText
-              onPicked: function(v) { root.setMenu(v) }
-            }
-
-            ActionRow {
-              width: parent.width
-              glyph: "󰜉"
-              title: strings.t("restartShell")
-              subtitle: strings.t("restartShell.help")
-              onActivated: root.restartShell()
             }
           }
 
           // ------------------------------------------------ rendering
-          Column {
-            visible: root.tab === "render"
+          Loader {
             width: parent.width
-            spacing: Style.space(14)
-
-            PlainText {
-              visible: root.st !== null && root.st.hidpi
-              width: parent.width
-              text: root.st ? strings.t("hidpiHint").arg(Commons.I18n.formatNumber(root.st.monitorScale, 2)) : ""
-              color: root.dim
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            Labeled {
-              width: parent.width
-              label: strings.t("presets")
-              hint: root.activePreset === "custom" ? strings.t("preset.custom") : strings.t("preset." + root.activePreset + ".help")
-              ButtonGroup {
-                width: parent.width
-                options: ["default", "hidpi", "lcd", "sharp", "smooth"].map(function (p) { return { value: p, label: strings.t("preset." + p) } })
-                value: root.activePreset
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.caption
-                onChanged: function(v) { root.applyPreset(v) }
-              }
-            }
-
-            PanelSeparator { foreground: root.foreground }
-
-            Repeater {
-              model: ["antialias", "hinting", "autohint", "embeddedbitmap"]
-              Labeled {
-                required property string modelData
+            active: root.tab === "render"
+            visible: active
+            sourceComponent: Component {
+              Column {
                 width: parent ? parent.width : 0
-                label: strings.t("render." + modelData)
-                hint: strings.t("render." + modelData + ".help")
-                ButtonGroup {
+                spacing: Style.space(14)
+
+                PlainText {
+                  visible: root.st !== null && root.st.hidpi
                   width: parent.width
-                  options: root.onOff()
-                  value: root.renderValue(modelData)
-                  foreground: root.foreground
-                  fontFamily: root.fontFamily
-                  fontSize: Style.font.caption
-                  onChanged: function(v) { root.setRendering(modelData, root.renderFromChoice(v)) }
+                  text: root.st ? strings.t("hidpiHint").arg(Commons.I18n.formatNumber(root.st.monitorScale, 2)) : ""
+                  color: root.dim
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
+
+                Labeled {
+                  width: parent.width
+                  label: strings.t("presets")
+                  hint: root.activePreset === "custom" ? strings.t("preset.custom") : strings.t("preset." + root.activePreset + ".help")
+                  ButtonGroup {
+                    width: parent.width
+                    options: ["default", "hidpi", "lcd", "sharp", "smooth"].map(function (p) { return { value: p, label: strings.t("preset." + p) } })
+                    value: root.activePreset
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.caption
+                    onChanged: function(v) { root.applyPreset(v) }
+                  }
+                }
+
+                PanelSeparator { foreground: root.foreground }
+
+                Repeater {
+                  model: ["antialias", "hinting", "autohint", "embeddedbitmap"]
+                  Labeled {
+                    required property string modelData
+                    width: parent ? parent.width : 0
+                    label: strings.t("render." + modelData)
+                    hint: strings.t("render." + modelData + ".help")
+                    ButtonGroup {
+                      width: parent.width
+                      options: root.onOff()
+                      value: root.renderValue(modelData)
+                      foreground: root.foreground
+                      fontFamily: root.fontFamily
+                      fontSize: Style.font.caption
+                      onChanged: function(v) { root.setRendering(modelData, root.renderFromChoice(v)) }
+                    }
+                  }
+                }
+
+                Labeled {
+                  width: parent.width
+                  label: strings.t("render.hintstyle")
+                  hint: strings.t("render.hintstyle.help")
+                  ButtonGroup {
+                    width: parent.width
+                    options: ["default", "hintnone", "hintslight", "hintmedium", "hintfull"].map(function (v) { return { value: v, label: strings.t("hintstyle." + v) } })
+                    value: root.renderValue("hintstyle")
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.caption
+                    onChanged: function(v) { root.setRendering("hintstyle", root.renderFromChoice(v)) }
+                  }
+                }
+
+                Labeled {
+                  width: parent.width
+                  label: strings.t("render.rgba")
+                  hint: strings.t("render.rgba.help")
+                  ButtonGroup {
+                    width: parent.width
+                    options: ["default", "none", "rgb", "bgr", "vrgb", "vbgr"].map(function (v) { return { value: v, label: strings.t("rgba." + v) } })
+                    value: root.renderValue("rgba")
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.caption
+                    onChanged: function(v) { root.setRendering("rgba", root.renderFromChoice(v)) }
+                  }
+                }
+
+                Labeled {
+                  width: parent.width
+                  label: strings.t("render.lcdfilter")
+                  hint: strings.t("render.lcdfilter.help")
+                  ButtonGroup {
+                    width: parent.width
+                    options: ["default", "lcddefault", "lcdlight", "lcdlegacy", "lcdnone"].map(function (v) { return { value: v, label: strings.t("lcdfilter." + v) } })
+                    value: root.renderValue("lcdfilter")
+                    foreground: root.foreground
+                    fontFamily: root.fontFamily
+                    fontSize: Style.font.caption
+                    onChanged: function(v) { root.setRendering("lcdfilter", root.renderFromChoice(v)) }
+                  }
+                }
+
+                PlainText {
+                  width: parent.width
+                  text: strings.t("render.note")
+                  color: root.dim
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
                 }
               }
-            }
-
-            Labeled {
-              width: parent.width
-              label: strings.t("render.hintstyle")
-              hint: strings.t("render.hintstyle.help")
-              ButtonGroup {
-                width: parent.width
-                options: ["default", "hintnone", "hintslight", "hintmedium", "hintfull"].map(function (v) { return { value: v, label: strings.t("hintstyle." + v) } })
-                value: root.renderValue("hintstyle")
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.caption
-                onChanged: function(v) { root.setRendering("hintstyle", root.renderFromChoice(v)) }
-              }
-            }
-
-            Labeled {
-              width: parent.width
-              label: strings.t("render.rgba")
-              hint: strings.t("render.rgba.help")
-              ButtonGroup {
-                width: parent.width
-                options: ["default", "none", "rgb", "bgr", "vrgb", "vbgr"].map(function (v) { return { value: v, label: strings.t("rgba." + v) } })
-                value: root.renderValue("rgba")
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.caption
-                onChanged: function(v) { root.setRendering("rgba", root.renderFromChoice(v)) }
-              }
-            }
-
-            Labeled {
-              width: parent.width
-              label: strings.t("render.lcdfilter")
-              hint: strings.t("render.lcdfilter.help")
-              ButtonGroup {
-                width: parent.width
-                options: ["default", "lcddefault", "lcdlight", "lcdlegacy", "lcdnone"].map(function (v) { return { value: v, label: strings.t("lcdfilter." + v) } })
-                value: root.renderValue("lcdfilter")
-                foreground: root.foreground
-                fontFamily: root.fontFamily
-                fontSize: Style.font.caption
-                onChanged: function(v) { root.setRendering("lcdfilter", root.renderFromChoice(v)) }
-              }
-            }
-
-            PlainText {
-              width: parent.width
-              text: strings.t("render.note")
-              color: root.dim
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
             }
           }
 
           // ------------------------------------------------ install
-          Column {
-            visible: root.tab === "install"
+          Loader {
             width: parent.width
-            spacing: Style.space(10)
+            active: root.tab === "install"
+            visible: active
+            sourceComponent: Component {
+              Column {
+                width: parent ? parent.width : 0
+                spacing: Style.space(10)
 
-            TextField {
-              id: searchField
-              width: parent.width
-              placeholderText: strings.t("searchPlaceholder")
-              foreground: root.foreground
-              font.family: root.fontFamily
-              maximumLength: 64
-              onTextEdited: { root.query = text; searchDebounce.restart() }
-              Keys.onEscapePressed: function(event) {
-                if (text) { text = ""; root.query = ""; searchDebounce.restart(); event.accepted = true }
-              }
-            }
-
-            ButtonGroup {
-              width: parent.width
-              options: ["all", "google", "fontsource", "nerd", "fontshare"].map(function (s) { return { value: s, label: strings.t("source." + s) } })
-              value: root.source
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              fontSize: Style.font.caption
-              onChanged: function(v) { root.source = v; root.search() }
-            }
-
-            Dropdown {
-              width: parent.width
-              label: strings.t("category")
-              value: root.category
-              options: ["", "sans-serif", "serif", "monospace", "display", "handwriting", "other"].map(function (c) {
-                return { value: c, label: c ? strings.t("category." + c) : strings.t("category.all") }
-              })
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-              onChanged: function(v) { root.category = v; root.search() }
-            }
-
-            PlainText {
-              width: parent.width
-              text: root.searching ? strings.t("searching")
-                : root.searchError !== "" ? root.searchError
-                : strings.tn("results", root.resultTotal).arg(Commons.I18n.formatNumber(root.resultTotal))
-              color: root.searchError !== "" ? root.urgent : root.dim
-              font.pixelSize: Style.font.caption
-              wrapMode: Text.WordWrap
-            }
-
-            Column {
-              width: parent.width
-              spacing: Style.space(4)
-              Repeater {
-                model: root.results
-                ResultRow {
-                  required property var modelData
-                  width: parent ? parent.width : 0
-                  item: modelData
+                TextField {
+                  id: searchField
+                  width: parent.width
+                  text: root.query
+                  placeholderText: strings.t("searchPlaceholder")
+                  foreground: root.foreground
+                  font.family: root.fontFamily
+                  maximumLength: 64
+                  onTextEdited: { root.query = text; searchDebounce.restart() }
+                  Keys.onEscapePressed: function(event) {
+                    if (text) { text = ""; root.query = ""; searchDebounce.restart(); event.accepted = true }
+                  }
                 }
-              }
-            }
 
-            ActionRow {
-              width: parent.width
-              glyph: "󰑐"
-              title: strings.t("refreshCatalogs")
-              subtitle: strings.t("refreshCatalogs.help")
-              onActivated: root.refreshCatalogs()
-            }
+                ButtonGroup {
+                  width: parent.width
+                  options: ["all", "google", "fontsource", "nerd", "fontshare"].map(function (s) { return { value: s, label: strings.t("source." + s) } })
+                  value: root.source
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  fontSize: Style.font.caption
+                  onChanged: function(v) { root.source = v; root.search() }
+                }
 
-            PanelSeparator { foreground: root.foreground; visible: root.st !== null && root.st.installed.length > 0 }
+                Dropdown {
+                  width: parent.width
+                  label: strings.t("category")
+                  value: root.category
+                  options: ["", "sans-serif", "serif", "monospace", "display", "handwriting", "other"].map(function (c) {
+                    return { value: c, label: c ? strings.t("category." + c) : strings.t("category.all") }
+                  })
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                  onChanged: function(v) { root.category = v; root.search() }
+                }
 
-            PanelSectionHeader {
-              visible: root.st !== null && root.st.installed.length > 0
-              text: strings.t("installedByPlugin")
-              foreground: root.foreground
-              fontFamily: root.fontFamily
-            }
+                PlainText {
+                  width: parent.width
+                  text: root.searching ? strings.t("searching")
+                    : root.searchError !== "" ? root.searchError
+                    : strings.tn("results", root.resultTotal).arg(Commons.I18n.formatNumber(root.resultTotal))
+                  color: root.searchError !== "" ? root.urgent : root.dim
+                  font.pixelSize: Style.font.caption
+                  wrapMode: Text.WordWrap
+                }
 
-            Column {
-              width: parent.width
-              spacing: Style.space(4)
-              Repeater {
-                model: root.st ? root.st.installed : []
+                Column {
+                  width: parent.width
+                  spacing: Style.space(4)
+                  Repeater {
+                    model: root.results
+                    ResultRow {
+                      required property var modelData
+                      width: parent ? parent.width : 0
+                      item: modelData
+                    }
+                  }
+                }
+
                 ActionRow {
-                  required property var modelData
-                  width: parent ? parent.width : 0
-                  glyph: "󰆴"
-                  title: (modelData.families || []).join(", ")
-                  subtitle: strings.t("installedMeta").arg(root.sourceLabel(modelData.source)).arg(modelData.files)
-                  titleFamily: (modelData.families || [""])[0]
-                  onActivated: root.uninstall(modelData.source, modelData.id, (modelData.families || [modelData.id])[0])
+                  width: parent.width
+                  glyph: "󰑐"
+                  title: strings.t("refreshCatalogs")
+                  subtitle: strings.t("refreshCatalogs.help")
+                  onActivated: root.refreshCatalogs()
+                }
+
+                PanelSeparator { foreground: root.foreground; visible: root.st !== null && root.st.installed.length > 0 }
+
+                PanelSectionHeader {
+                  visible: root.st !== null && root.st.installed.length > 0
+                  text: strings.t("installedByPlugin")
+                  foreground: root.foreground
+                  fontFamily: root.fontFamily
+                }
+
+                Column {
+                  width: parent.width
+                  spacing: Style.space(4)
+                  Repeater {
+                    model: root.st ? root.st.installed : []
+                    ActionRow {
+                      required property var modelData
+                      width: parent ? parent.width : 0
+                      glyph: "󰆴"
+                      title: (modelData.families || []).join(", ")
+                      subtitle: strings.t("installedMeta").arg(root.sourceLabel(modelData.source)).arg(modelData.files)
+                      titleFamily: (modelData.families || [""])[0]
+                      onActivated: root.uninstall(modelData.source, modelData.id, (modelData.families || [modelData.id])[0])
+                    }
+                  }
                 }
               }
             }
@@ -1109,7 +1153,7 @@ Panel {
     id: result
     property var item: ({})
     readonly property string key: item.source + ":" + item.id
-    readonly property bool previewing: root.previewKey === key && root.previewPath !== "" && previewFont.status === FontLoader.Ready
+    readonly property bool previewing: root.previewKey === key && root.previewReady
     readonly property bool installing: root.installingKey === key
 
     hasCursor: resultMouse.containsMouse
@@ -1149,7 +1193,7 @@ Panel {
           textFormat: Text.PlainText
           text: result.item.family || ""
           color: root.foreground
-          font.family: result.previewing ? previewFont.name : (result.item.installed ? result.item.family : root.fontFamily)
+          font.family: result.previewing ? root.previewFamily : (result.item.installed ? result.item.family : root.fontFamily)
           font.pixelSize: Math.round(Style.font.body * 1.2)
           elide: Text.ElideRight
         }
@@ -1166,7 +1210,7 @@ Panel {
           textFormat: Text.PlainText
           text: root.sampleText
           color: root.foreground
-          font.family: result.previewing ? previewFont.name : result.item.family
+          font.family: result.previewing ? root.previewFamily : result.item.family
           font.pixelSize: Style.font.body
           wrapMode: Text.WordWrap
         }
