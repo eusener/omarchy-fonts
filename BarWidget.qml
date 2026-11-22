@@ -489,23 +489,57 @@ Panel {
         property real swipeVelocity: 0
         property real lastWheelAt: 0
 
+        // Momentum after the fingers lift: constant deceleration from the
+        // gesture's last velocity (Flickable.flick does not move when called
+        // from a wheel gesture). Off when Omarchy animations are off.
+        readonly property real coastDeceleration: 5000
+        function coast(velocity) {
+          var speed = Math.min(Math.abs(velocity), 6000)
+          var distance = speed * speed / (2 * coastDeceleration)
+          var target = Math.max(0, Math.min(Math.max(0, contentHeight - height), contentY + (velocity < 0 ? distance : -distance)))
+          var duration = Style.duration(Math.round(speed / coastDeceleration * 1000))
+          if (duration <= 0 || Math.abs(target - contentY) < 1) return
+          coastAnim.to = target
+          coastAnim.duration = duration
+          coastAnim.restart()
+        }
+
+        NumberAnimation {
+          id: coastAnim
+          target: panelFlick
+          property: "contentY"
+          easing.type: Easing.OutQuad
+        }
+
+        onDraggingChanged: if (dragging) coastAnim.stop()
+
         WheelHandler {
           acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
           onWheel: function(event) {
             var now = Date.now()
-            if (event.pixelDelta.y !== 0) {
-              var d = event.pixelDelta.y * panelFlick.touchpadGain
-              panelFlick.cancelFlick()
-              panelFlick.scrollBy(-d)
-              var dt = Math.max(8, now - panelFlick.lastWheelAt)
-              var v = dt > 120 ? 0 : d * 1000 / dt
-              panelFlick.swipeVelocity = panelFlick.swipeVelocity * 0.6 + v * 0.4
-              if (event.phase === Qt.ScrollEnd && Math.abs(panelFlick.swipeVelocity) > Style.space(250))
-                panelFlick.flick(0, panelFlick.swipeVelocity)
-              if (event.phase === Qt.ScrollEnd || event.phase === Qt.ScrollBegin) panelFlick.swipeVelocity = 0
-            } else {
+            var touchpad = (event.device && event.device.type === PointerDevice.TouchPad)
+              || event.phase !== Qt.NoScrollPhase || event.pixelDelta.y !== 0
+            if (!touchpad) {
+              coastAnim.stop()
               panelFlick.scrollBy(-event.angleDelta.y / 120 * Style.space(90))
+              return
             }
+            if (event.phase === Qt.ScrollEnd) {
+              // The gesture ends with an empty event: hand the motion to a flick.
+              var recent = now - panelFlick.lastWheelAt < 80
+              if (recent && Math.abs(panelFlick.swipeVelocity) > Style.space(200))
+                panelFlick.coast(panelFlick.swipeVelocity)
+              panelFlick.swipeVelocity = 0
+              return
+            }
+            // pixelDelta arrives rounded to whole pixels; angleDelta carries the
+            // same motion at about 12x the resolution, so use it for smooth steps.
+            var d = (event.angleDelta.y !== 0 ? event.angleDelta.y / 12 : event.pixelDelta.y) * panelFlick.touchpadGain
+            coastAnim.stop()
+            panelFlick.scrollBy(-d)
+            var dt = now - panelFlick.lastWheelAt
+            var v = (dt > 0 && dt < 80) ? d * 1000 / dt : 0
+            panelFlick.swipeVelocity = dt >= 80 ? v : panelFlick.swipeVelocity * 0.7 + v * 0.3
             panelFlick.lastWheelAt = now
           }
         }
