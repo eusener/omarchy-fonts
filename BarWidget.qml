@@ -34,6 +34,7 @@ Panel {
   property string message: ""
   property bool messageIsError: false
   property bool pendingReset: false
+  property real touchpadScrollFactor: 1
   // Nothing under ~/.config changes until the user has agreed once.
   property var pendingConsent: null
   readonly property bool consented: st ? st.consented === true : false
@@ -268,7 +269,24 @@ Panel {
 
   onTabChanged: if (tab === "install" && results.length === 0 && opened) search()
 
-  Component.onCompleted: refresh()
+  Component.onCompleted: {
+    refresh()
+    scrollFactorProc.running = true
+  }
+
+  Process {
+    id: scrollFactorProc
+    command: ["hyprctl", "-j", "getoption", "input:touchpad:scroll_factor"]
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: {
+        try {
+          var f = Number(JSON.parse(text || "{}").float)
+          if (isFinite(f) && f > 0) root.touchpadScrollFactor = f
+        } catch (e) {}
+      }
+    }
+  }
 
   Timer {
     id: searchDebounce
@@ -461,13 +479,34 @@ Panel {
           contentY = Math.max(0, Math.min(Math.max(0, contentHeight - height), contentY + dy))
         }
 
-        // Wheel and touchpad move the content directly, like the built-in
-        // panels; Flickable's own wheel handling adds inertia that feels heavy.
+        maximumFlickVelocity: Style.space(5000)
+        flickDeceleration: Style.space(2400)
+
+        // Touchpad deltas arrive scaled by Hyprland's scroll_factor (often
+        // well below 1, tuned for browsers that add their own acceleration),
+        // so the gain undoes it; lifting the fingers keeps the motion going.
+        property real touchpadGain: Math.max(1, Math.min(4, 1 / Math.max(0.05, root.touchpadScrollFactor)))
+        property real swipeVelocity: 0
+        property real lastWheelAt: 0
+
         WheelHandler {
           acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
           onWheel: function(event) {
-            var d = event.pixelDelta.y !== 0 ? event.pixelDelta.y : event.angleDelta.y / 120 * Style.space(48)
-            panelFlick.scrollBy(-d)
+            var now = Date.now()
+            if (event.pixelDelta.y !== 0) {
+              var d = event.pixelDelta.y * panelFlick.touchpadGain
+              panelFlick.cancelFlick()
+              panelFlick.scrollBy(-d)
+              var dt = Math.max(8, now - panelFlick.lastWheelAt)
+              var v = dt > 120 ? 0 : d * 1000 / dt
+              panelFlick.swipeVelocity = panelFlick.swipeVelocity * 0.6 + v * 0.4
+              if (event.phase === Qt.ScrollEnd && Math.abs(panelFlick.swipeVelocity) > Style.space(250))
+                panelFlick.flick(0, panelFlick.swipeVelocity)
+              if (event.phase === Qt.ScrollEnd || event.phase === Qt.ScrollBegin) panelFlick.swipeVelocity = 0
+            } else {
+              panelFlick.scrollBy(-event.angleDelta.y / 120 * Style.space(90))
+            }
+            panelFlick.lastWheelAt = now
           }
         }
 
