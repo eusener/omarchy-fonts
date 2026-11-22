@@ -137,5 +137,7 @@
   "remove": "Remove",
   "alreadyInstalled": "Already installed on the system",
   "install": "Install",
-  "tip": "1–4 switch tabs · ←/→ too · R reloads · Esc closes"
+  "tip": "1–4 switch tabs · ←/→ too · R reloads · Esc closes",
+  "consent": "To apply fonts system-wide the plugin will change: fontconfig rules (~/.config/fontconfig), GTK font settings (gsettings), the font lines of your terminal configs, and its own Hyprland file (plus one line in hyprland.lua). Every change is backed up first, and “Restore defaults” undoes it all. Allow?",
+  "consentConfirm": "Allow"
 }

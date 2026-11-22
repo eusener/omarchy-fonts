@@ -24,7 +24,7 @@ command also rewrites terminal font sizes.
 ## Install
 
 ```bash
-omarchy plugin add https://github.com/<you>/omarchy-fonts.git --enable
+omarchy plugin add https://github.com/eusener/omarchy-fonts.git --enable
 # or, from a checkout:
 ./install.sh && omarchy plugin enable eusener.fonts --section right
 ```
@@ -46,6 +46,13 @@ nothing is compiled.
 ## Privileges
 
 None. The plugin never uses `sudo` or `pkexec` and only writes inside your home.
+
+## Consent
+
+Nothing under `~/.config` or in gsettings changes until you agree once: the
+first change made from the panel opens a dialog listing what will be modified.
+From the command line, add `--yes`. Installing or removing fonts only touches
+`~/.local/share/fonts/eusener-fonts/` and does not need it.
 
 ## Files it changes
 
@@ -103,7 +110,7 @@ The helper works without the panel:
 
 ```bash
 ./fonts.py state
-./fonts.py set-role sans "Inter"
+./fonts.py set-role sans "Inter" --yes   # --yes once records consent
 ./fonts.py preset hidpi
 ./fonts.py set-terminal "" 11            # follow system monospace, 11 pt
 ./fonts.py search "plex" --source google --category sans-serif

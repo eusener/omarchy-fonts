@@ -137,5 +137,7 @@
   "remove": "Remover",
   "alreadyInstalled": "Já instalada no sistema",
   "install": "Instalar",
-  "tip": "1–4 trocam de aba · ←/→ também · R recarrega · Esc fecha"
+  "tip": "1–4 trocam de aba · ←/→ também · R recarrega · Esc fecha",
+  "consent": "Para aplicar fontes no sistema todo, o plugin vai alterar: regras do fontconfig (~/.config/fontconfig), as configurações de fonte do GTK (gsettings), as linhas de fonte dos terminais e um arquivo próprio do Hyprland (mais uma linha em hyprland.lua). Antes de cada alteração é feito um backup, e “Restaurar padrões” desfaz tudo. Permitir?",
+  "consentConfirm": "Permitir"
 }

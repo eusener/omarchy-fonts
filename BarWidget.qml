@@ -34,6 +34,9 @@ Panel {
   property string message: ""
   property bool messageIsError: false
   property bool pendingReset: false
+  // Nothing under ~/.config changes until the user has agreed once.
+  property var pendingConsent: null
+  readonly property bool consented: st ? st.consented === true : false
 
   // ---- navigation
   property string tab: "system"
@@ -69,8 +72,26 @@ Panel {
     if (!stateProc.running) stateProc.running = true
   }
 
+  // Every configuration write asks once, then remembers.
+  function needsConsent(args, successText, detached, notice) {
+    if (consented || args.indexOf("--consent") >= 0) return false
+    pendingConsent = { args: args, successText: successText || "", detached: detached === true, notice: notice || "" }
+    return true
+  }
+
+  function confirmConsent() {
+    var p = pendingConsent
+    pendingConsent = null
+    if (!p) return
+    var args = p.args.concat(["--consent"])
+    if (p.detached) runDetached(args, p.notice)
+    else runHelper(args, p.successText)
+  }
+
   function runHelper(args, successText) {
     if (busy) return
+    var writes = ["set-role", "set-metric", "set-rendering", "preset", "set-gtk", "set-terminal", "set-groupbar", "set-menu", "reset"]
+    if (writes.indexOf(args[0]) >= 0 && needsConsent(args, successText, false)) return
     busy = true
     messageIsError = false
     message = strings.t("applying")
@@ -81,6 +102,7 @@ Panel {
 
   // Changes that restart the shell must outlive it, so they run detached.
   function runDetached(args, notice) {
+    if (needsConsent(args, "", true, notice)) return
     messageIsError = false
     message = notice
     Quickshell.execDetached(["python3", root.helperPath].concat(args))
@@ -236,6 +258,7 @@ Panel {
 
   onOpenedChanged: if (opened) {
     pendingReset = false
+    pendingConsent = null
     refresh()
     if (tab === "install" && results.length === 0) search()
     Qt.callLater(function() { if (panel.loadedContent) panel.loadedContent.forceActiveFocus() })
@@ -377,6 +400,7 @@ Panel {
       implicitHeight: column.implicitHeight
       anchors.fill: parent
       onMoveRequested: function(dx, dy) {
+        if (consentDialog.opened) { if (dx !== 0) consentDialog.selectedIndex = consentDialog.selectedIndex === 0 ? 1 : 0; return }
         if (resetDialog.opened) { if (dx !== 0) resetDialog.selectedIndex = resetDialog.selectedIndex === 0 ? 1 : 0; return }
         if (dx !== 0) {
           var i = root.tabs.indexOf(root.tab)
@@ -387,12 +411,21 @@ Panel {
         }
       }
       onActivateRequested: {
+        if (consentDialog.opened) {
+          if (consentDialog.selectedIndex === 0) root.pendingConsent = null
+          else root.confirmConsent()
+          return
+        }
         if (resetDialog.opened) {
           if (resetDialog.selectedIndex === 0) root.pendingReset = false
           else root.resetAll()
         }
       }
-      onCloseRequested: resetDialog.opened ? (root.pendingReset = false) : root.close()
+      onCloseRequested: {
+        if (consentDialog.opened) root.pendingConsent = null
+        else if (resetDialog.opened) root.pendingReset = false
+        else root.close()
+      }
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         if (t === "r" || t === "R") root.refresh()
@@ -807,6 +840,19 @@ Panel {
             wrapMode: Text.WordWrap
           }
         }
+      }
+
+      ConfirmDialog {
+        id: consentDialog
+        anchors.fill: parent
+        z: 11
+        opened: root.pendingConsent !== null
+        message: strings.t("consent")
+        confirmText: strings.t("consentConfirm")
+        foreground: root.foreground
+        fontFamily: root.fontFamily
+        onCanceled: root.pendingConsent = null
+        onConfirmed: root.confirmConsent()
       }
 
       ConfirmDialog {

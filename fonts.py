@@ -21,6 +21,9 @@ stdout; failures print a message on stderr and exit non-zero.
   fonts.py install <source> <id>
   fonts.py uninstall <source> <id>
 
+Commands that change configuration refuse to run until consent was given
+once, from the panel or by adding --yes.
+
 Nothing here needs root. Files written:
   ~/.config/fontconfig/conf.d/60-eusener-fonts.conf   aliases + rendering
   ~/.config/fontconfig/fonts.conf                     monospace, via omarchy-font-set
@@ -69,6 +72,9 @@ SETTINGS_FILE = CONFIG / "omarchy" / APP / "settings.json"
 REGISTRY_FILE = STATE / "installed.json"
 ORIGINAL_FILE = STATE / "original.json"
 BACKUP_DIR = STATE / "backups"
+CONSENT_FILE = STATE / "consent"
+WRITE_COMMANDS = {"set-role", "set-metric", "set-rendering", "preset", "set-gtk",
+                  "set-terminal", "set-groupbar", "set-menu", "reset"}
 FC_FILE = CONFIG / "fontconfig/conf.d/60-eusener-fonts.conf"
 HYPR_FILE = CONFIG / "hypr/eusener_fonts.lua"
 HYPR_MAIN = CONFIG / "hypr/hyprland.lua"
@@ -1359,6 +1365,7 @@ def state():
     "installed": sorted(reg.values(), key=lambda e: e.get("installedAt", ""), reverse=True),
     "catalogs": {s: int(load_json(catalog_path(s), {}).get("fetchedAt", 0)) for s in SOURCES},
     "gsettings": gsettings_available(),
+    "consented": CONSENT_FILE.exists(),
   }
 
 
@@ -1482,6 +1489,15 @@ def cmd_reset():
   return {"ok": True, "restartedShell": mono_was_set}
 
 
+def require_consent(given):
+  """Nothing under ~/.config changes until the user has agreed once."""
+  if given and not CONSENT_FILE.exists():
+    STATE.mkdir(parents=True, exist_ok=True)
+    CONSENT_FILE.write_text(time.strftime("%Y-%m-%dT%H:%M:%S") + "\n")
+  if not CONSENT_FILE.exists():
+    raise UserError("Confirm once in the panel (or pass --yes) before the plugin changes your configuration")
+
+
 def parse_flags(args, names):
   flags, rest = {}, []
   i = 0
@@ -1502,7 +1518,9 @@ def main(argv):
   if not argv or argv[0] in ("-h", "--help", "help"):
     print(__doc__.strip())
     return 0
-  cmd, args = argv[0], argv[1:]
+  cmd, args = argv[0], [a for a in argv[1:] if a not in ("--consent", "--yes")]
+  if cmd in WRITE_COMMANDS:
+    require_consent("--consent" in argv or "--yes" in argv)
 
   def arg(i, default=None):
     return args[i] if len(args) > i else default

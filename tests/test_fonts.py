@@ -357,9 +357,19 @@ class Settings(unittest.TestCase):
     self.assertNotIn("junk", merged)
     self.assertIsNone(merged["rendering"]["rgba"])
 
+  def test_write_commands_need_consent(self):
+    fonts.CONSENT_FILE.unlink(missing_ok=True)
+    with self.assertRaises(fonts.UserError):
+      fonts.main(["set-metric", "on"])
+    self.assertFalse(fonts.SETTINGS_FILE.exists() and fonts.load_settings()["replaceMetricAliases"])
+    with mock.patch.object(fonts, "apply_fontconfig"), mock.patch.object(fonts, "emit"):
+      fonts.main(["set-metric", "on", "--consent"])
+    self.assertTrue(fonts.CONSENT_FILE.exists())
+    self.assertTrue(fonts.load_settings()["replaceMetricAliases"])
+
   def test_cli_reports_errors_on_stderr(self):
     import subprocess
-    result = subprocess.run([sys.executable, str(ROOT / "fonts.py"), "set-role", "sans", "<b>x</b>"],
+    result = subprocess.run([sys.executable, str(ROOT / "fonts.py"), "set-role", "sans", "<b>x</b>", "--yes"],
                             capture_output=True, text=True, env=os.environ.copy())
     self.assertEqual(result.returncode, 1)
     self.assertEqual(result.stdout, "")
