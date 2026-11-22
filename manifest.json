@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "eusener.fonts",
+  "name": "Omarchy Fonts",
+  "version": "0.1.0",
+  "author": "eusener",
+  "license": "MIT",
+  "description": "System-wide fonts: sans, serif, monospace and emoji families, GTK/Qt, terminals and Hyprland sizes, rendering (antialiasing, hinting, subpixel), and installs from Google Fonts, Fontsource, Nerd Fonts and Fontshare.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Fonts",
+    "description": "System fonts, sizes, rendering and font installs.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
